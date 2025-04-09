@@ -37,8 +37,8 @@ function M.setup(opts)
         native_servers = {},
         auto_approve = false,
         use_bundled_binary = false, -- Whether to use bundled mcp-hub binary
-        cmd = "mcp-hub",
-        cmdArgs = {},
+        cmd = nil, -- will be set based on system if not provided
+        cmdArgs = nil, -- will be set based on system if not provided
         log = {
             level = vim.log.levels.ERROR,
             to_file = false,
@@ -69,11 +69,9 @@ function M.setup(opts)
         on_error = function(str) end,
     }, opts or {})
 
-    -- Override cmd if using bundled binary
-    if config.use_bundled_binary then
-        config.cmd = utils.get_bundled_mcp_path()
-    end
-
+    local cmds = utils.get_default_cmds(config)
+    config.cmd = cmds.cmd
+    config.cmdArgs = cmds.cmdArgs
     if config.auto_approve then
         vim.g.mcphub_auto_approve = vim.g.mcphub_auto_approve == nil and true or vim.g.mcphub_auto_approve
     end
@@ -146,18 +144,28 @@ function M.setup(opts)
         })
     end)
 
-    if not ok then
-        -- Handle executable not found error
-        local msg = [[mcp-hub executable not found. Please ensure:
+    local help_msg = [[mcp-hub executable not found. Please ensure:
 1. For global install: Run 'npm install -g mcp-hub@latest'
 2. For bundled install: Set build = 'bundled_build.lua' in lazy spec and use_bundled_binary = true in config.
 3. For custom install: Verify cmd/cmdArgs point to valid mcp-hub executable
 ]]
-        return M._on_setup_failed(Error("SETUP", Error.Types.SETUP.MISSING_DEPENDENCY, msg, { stack = job }))
+    if not ok then
+        -- Handle executable not found error
+        return M._on_setup_failed(Error("SETUP", Error.Types.SETUP.MISSING_DEPENDENCY, help_msg, { stack = job }))
     end
 
-    -- Start the job
-    job:start()
+    -- Start the job (uv.spawn might fail)
+    local spawn_ok, err = pcall(job.start, job)
+    if not spawn_ok then
+        -- Handle spawn error
+        return M._on_setup_failed(
+            Error(
+                "SETUP",
+                Error.Types.SETUP.MISSING_DEPENDENCY,
+                "Failed to spawn mcp-hub process: " .. tostring(err) .. "\n\n" .. help_msg
+            )
+        )
+    end
 
     return State.hub_instance
 end
