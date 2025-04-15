@@ -39,11 +39,14 @@ Error.Types = {
         CACHE_ERROR = "CACHE_ERROR", -- Error with marketplace cache
     },
     SERVER = {
+        RESTART = "RESTART", -- Server restart error
         CONNECTION = "CONNECTION",
         HEALTH_CHECK = "HEALTH_CHECK",
         API_ERROR = "API_ERROR",
         CURL_ERROR = "CURL_ERROR",
         TIMEOUT = "TIMEOUT",
+        SERVER_START = "SERVER_START",
+        SSL_ERROR = "SSL_ERROR",
     },
     RUNTIME = {
         INVALID_STATE = "INVALID_STATE",

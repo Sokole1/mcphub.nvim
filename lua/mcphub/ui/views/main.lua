@@ -7,6 +7,7 @@ local NuiLine = require("mcphub.utils.nuiline")
 local State = require("mcphub.state")
 local Text = require("mcphub.utils.text")
 local View = require("mcphub.ui.views.base")
+local constants = require("mcphub.utils.constants")
 local native = require("mcphub.native")
 local renderer = require("mcphub.utils.renderer")
 local utils = require("mcphub.utils")
@@ -48,6 +49,57 @@ function MainView:show_prompts_view()
     local cap_pos = self.active_capability:get_cursor_position()
     if cap_pos then
         vim.api.nvim_win_set_cursor(0, cap_pos)
+    end
+end
+
+function MainView:handle_collapse()
+    -- Get current line
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local line = cursor[1]
+
+    -- Get line info
+    local type, context = self:get_line_info(line)
+
+    -- If we're on a server line, handle directly
+    if type == "server" then
+        if context.status == "connected" and self.expanded_server == context.name then
+            local server_line = line
+            self.expanded_server = nil -- collapse
+            self:draw()
+            vim.api.nvim_win_set_cursor(0, { server_line, 3 })
+            return
+        end
+    end
+
+    -- If we have an expanded server, determine if we're in its scope
+    if self.expanded_server then
+        local expanded_server_line
+        local next_server_line
+
+        -- Find the expanded server's line and next server's line
+        for i, tracked in ipairs(self.interactive_lines) do
+            if tracked.type == "server" then
+                if tracked.context.name == self.expanded_server then
+                    expanded_server_line = tracked.line
+                elseif expanded_server_line and not next_server_line then
+                    -- This is the next server after our expanded one
+                    next_server_line = tracked.line
+                    break
+                end
+            end
+        end
+
+        -- Check if current line is within expanded server's section:
+        -- After expanded server line and before next server (or end if no next server)
+        if
+            expanded_server_line
+            and line > expanded_server_line
+            and (not next_server_line or line < next_server_line)
+        then
+            self.expanded_server = nil
+            self:draw()
+            vim.api.nvim_win_set_cursor(0, { expanded_server_line, 3 })
+        end
     end
 end
 
@@ -166,7 +218,7 @@ function MainView:handle_cursor_move()
         if type then
             -- Add virtual text without line highlight
             self.cursor_highlight = vim.api.nvim_buf_set_extmark(self.ui.buffer, self.hover_ns, line - 1, 0, {
-                virt_text = { { context and context.hint or "Press <CR> to interact", Text.highlights.muted } },
+                virt_text = { { context and context.hint or "Press 'l' to interact", Text.highlights.muted } },
                 virt_text_pos = "eol",
             })
         end
@@ -176,7 +228,7 @@ end
 function MainView:setup_active_mode()
     if self.active_capability then
         self.keymaps = {
-            ["<CR>"] = {
+            ["l"] = {
                 action = function()
                     if self.active_capability.handle_action then
                         self.active_capability:handle_action(vim.api.nvim_win_get_cursor(0)[1])
@@ -192,7 +244,7 @@ function MainView:setup_active_mode()
                 end,
                 desc = "Open text box",
             },
-            ["<Esc>"] = {
+            ["h"] = {
                 action = function()
                     -- -- Store capability line before exiting
                     -- self.cursor_positions.capability_line = vim.api.nvim_win_get_cursor(0)
@@ -219,19 +271,25 @@ function MainView:setup_active_mode()
                 action = function()
                     self:handle_server_toggle()
                 end,
-                desc = "Toggle server",
+                desc = "Toggle",
             },
-            ["<CR>"] = {
+            ["h"] = {
+                action = function()
+                    self:handle_collapse()
+                end,
+                desc = "Collapse",
+            },
+            ["l"] = {
                 action = function()
                     self:handle_action()
                 end,
-                desc = "Expand/Collapse",
+                desc = "Expand",
             },
             ["gd"] = {
                 action = function()
                     self:show_prompts_view()
                 end,
-                desc = "View prompts",
+                desc = "Preview",
             },
         }
     end
@@ -254,21 +312,24 @@ function MainView:handle_server_toggle()
     local type, context = self:get_line_info(line)
     if type == "server" and context and State.hub_instance then
         -- Handle regular MCP server
+        -- Gets updated via sse endpoint after file changed rather than explicitly send curl request
         if context.status == "disabled" then
             State.hub_instance:start_mcp_server(context.name, {
-                callback = function(response, err)
-                    if err then
-                        vim.notify("Failed to enable server: " .. err, vim.log.levels.ERROR)
-                    end
-                end,
+                -- via_curl_request = true,
+                -- callback = function(response, err)
+                --     if err then
+                --         vim.notify("Failed to enable server: " .. err, vim.log.levels.ERROR)
+                --     end
+                -- end,
             })
         else
             State.hub_instance:stop_mcp_server(context.name, true, {
-                callback = function(response, err)
-                    if err then
-                        vim.notify("Failed to disable server: " .. err, vim.log.levels.ERROR)
-                    end
-                end,
+                -- via_curl_request = true,
+                -- callback = function(response, err)
+                --     if err then
+                --         vim.notify("Failed to disable server: " .. err, vim.log.levels.ERROR)
+                --     end
+                -- end,
             })
         end
     elseif
@@ -344,36 +405,6 @@ function MainView:get_initial_cursor_position()
     return #lines + 1
 end
 
---- Render server status section
----@return NuiLine[]
-function MainView:render_hub_status()
-    local lines = {}
-    -- Server state header and status
-    local status = renderer.get_server_status_info(State.server_state.status)
-    local status_line = NuiLine():append(status.icon, status.hl):append(({
-        connected = "Connected",
-        connecting = "Connecting...",
-        disconnected = "Disconnected",
-        restarting = "Restarting...",
-    })[State.server_state.status] or "Unknown", status.hl)
-
-    if State.server_state.started_at then
-        status_line:append(" " .. utils.format_relative_time(State.server_state.started_at), Text.highlights.muted)
-    end
-    table.insert(lines, Text.pad_line(status_line))
-    table.insert(lines, self:divider())
-    if State.server_state.status ~= "connected" then
-        vim.list_extend(lines, renderer.render_server_entries(State.server_output.entries, false))
-        local errors = renderer.render_hub_errors(nil, false)
-        if #errors > 0 then
-            vim.list_extend(lines, errors)
-        end
-    end
-
-    table.insert(lines, Text.empty_line())
-    return lines
-end
-
 --- Sort servers by status (connected first, then disconnected, disabled last) and alphabetically within each group
 ---@param servers table[] List of servers to sort
 local function sort_servers(servers)
@@ -444,7 +475,7 @@ function MainView:render_servers(line_offset)
     local left_section = NuiLine():append("MCP Servers", Text.highlights.title)
 
     -- Add token count on MCP Servers section if connected
-    if State.server_state.status == "connected" and State.hub_instance and State.hub_instance:is_ready() then
+    if State:is_connected() and State.hub_instance and State.hub_instance:is_ready() then
         local prompts = State.hub_instance:generate_prompts()
         if prompts then
             -- Calculate total tokens from all prompts
@@ -522,7 +553,7 @@ function MainView:render_servers(line_offset)
     )
     -- Track line for interaction
     self:track_line(current_line + 1, "create_server", {
-        hint = "Press <CR> to create server",
+        hint = "Press 'l' to create server",
     })
 
     return lines
@@ -569,6 +600,10 @@ function MainView:before_leave()
     View.before_leave(self)
 end
 
+function MainView:should_show_logs()
+    return not vim.tbl_contains({ constants.HubState.READY, constants.HubState.RESTARTED }, State.server_state.state)
+end
+
 function MainView:render()
     -- Handle special states from base view
     if State.setup_state == "failed" or State.setup_state == "in_progress" then
@@ -576,9 +611,16 @@ function MainView:render()
     end
     -- Get base header
     local lines = self:render_header(false)
-    if State.server_state.status ~= "connected" then
-        -- Server status section
-        vim.list_extend(lines, self:render_hub_status())
+    if self:should_show_logs() then
+        local state_info = renderer.get_hub_info(State.server_state.state)
+        local breadcrumb_line = NuiLine():append(state_info.icon, state_info.hl):append(state_info.desc, state_info.hl)
+        table.insert(lines, Text.pad_line(breadcrumb_line))
+        table.insert(lines, self:divider())
+        vim.list_extend(lines, renderer.render_server_entries(State.server_output.entries, false))
+        local errors = renderer.render_hub_errors(nil, false)
+        if #errors > 0 then
+            vim.list_extend(lines, errors)
+        end
         return lines
     end
     -- Handle capability mode

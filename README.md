@@ -105,7 +105,7 @@ Thank you to the following amazing people:
 <a href="https://github.com/yingmanwumen"><img src="https://github.com/yingmanwumen.png" width="60px" alt="yingmanwumen" /></a>
 <a href="https://github.com/yetone"><img src="https://github.com/yetone.png" width="60px" alt="Yetone" /></a>
 <a href="https://github.com/omarcresp"><img src="https://github.com/omarcresp.png" width="60px" alt="omarcresp" /></a>
-
+<a href="https://github.com/petermoser"><img src="https://github.com/petermoser.png" width="60px" alt="petermoser" /></a>
 </p>
 
 ## ✨ Features
@@ -181,9 +181,11 @@ Thank you to the following amazing people:
 <details>
 <summary><strong>Performance and Reliability</strong></summary>
 
+- Full multi-instance support with synchronized state
+- Configuration file watching with real-time updates
+- Smart shutdown handling (configurable delay)
 - Parallel startup for improved performance
 - Automatic server lifecycle management
-- Smart shutdown handling with configurable delay
 </details>
 
 <details>
@@ -227,6 +229,7 @@ require("mcphub").setup({
     native_servers = {}, -- add your native servers here
 
     auto_approve = false, -- Auto approve mcp tool calls
+    auto_toggle_mcp_servers = true, -- Let LLMs start and stop MCP servers automatically
     -- Extensions configuration
     extensions = {
         avante = {
@@ -240,6 +243,7 @@ require("mcphub").setup({
             make_slash_commands = true, -- make /slash commands from MCP server prompts
         },
     },
+
 
     -- Default window settings
     ui = {
@@ -269,6 +273,10 @@ require("mcphub").setup({
     -- Custom Server command configuration
     --cmd = "node", -- The command to invoke the MCP Hub Server
     --cmdArgs = {"/path/to/node_modules/mcp-hub/dist/cli.js"},    -- Additional arguments for the command
+    -- In cases where mcp-hub server is hosted somewhere, set this to the server URL e.g `http://mydomain.com:customport` or `https://url_without_need_for_port.com`
+    -- server_url = nil, -- defaults to `http://localhost:port`
+    -- Multi-instance Support
+    shutdown_delay = 600000, -- Delay in ms before shutting down the server when last instance closes (default: 10 minutes)
 
     -- Logging configuration
     log = {
@@ -310,6 +318,7 @@ MCPHub uses a JSON configuration file to define MCP servers. The default locatio
 }
 ```
 
+Configuration file (`~/.config/mcphub/servers.json`) is watched for changes and updates are applied automatically in real-time across all Neovim instances.
 </details>
 
 ##### MCP Servers Config
@@ -340,7 +349,7 @@ Open the MCPHub UI to manage servers, test tools and monitor status:
 :MCPHub
 ```
 <details>
-<summary>Use hub instance api in your code</summary>
+<summary>For Chat plugin Devs: Use hub instance api in your code</summary>
 
 ```lua
 local hub = mcphub.get_hub_instance()
@@ -396,11 +405,13 @@ Server prompts will be available as `/mcp:server_name:prompt_name` in chat.
 The `mcp_tool()` function now returns two separate tools (`use_mcp_tool` and `access_mcp_resource`) for better schema generation:
 
 ```lua
-extensions = {
-    avante = {
-        make_slash_commands = true, -- make /slash commands from MCP server prompts
+require("mcphub").setup({
+    extensions = {
+        avante = {
+            make_slash_commands = true, -- make /slash commands from MCP server prompts
+        }
     }
-}
+})
 ```
 
 ```lua
@@ -471,17 +482,20 @@ Add MCP capabilities to CodeCompanion.
 
 ![image](https://github.com/user-attachments/assets/f1fa305a-5d48-4119-b3e6-e13a9176da07)
 
-> Set `show_result_in_chat = true` to view the mcp tool call result in the chat buffer. Note that, If the tool call return markdown with headers, the content after the headers wont be sent
+> Set `show_result_in_chat = true` to view the mcp tool call result in the chat buffer. 
+
 ```lua
-extensions = {
-    codecompanion = {
-        -- Show the mcp tool result in the chat buffer
-        -- NOTE:if the result is markdown with headers, content after the headers wont be sent by codecompanion
-        show_result_in_chat = true,
-        make_vars = true, -- make chat #variables from MCP server resources
-        make_slash_commands = true, -- make /slash_commands from MCP server prompts
-    },
-}
+
+require("mcphub").setup({
+    extensions = {
+        codecompanion = {
+            -- Show the mcp tool result in the chat buffer
+            show_result_in_chat = true,
+            make_vars = true, -- make chat #variables from MCP server resources
+            make_slash_commands = true, -- make /slash_commands from MCP server prompts
+        },
+    }
+})
 ```
 
 ```lua
@@ -841,7 +855,6 @@ All tools, resources, and templates from the server above are converted into a c
    - Feel free to open an [Issue](https://github.com/ravitemer/mcphub.nvim/issues) for bugs or doubts
    - Create a [Discussion](https://github.com/ravitemer/mcphub.nvim/discussions) for questions, showcase, or feature requests
 
- Note: You can also access the Express server directly at http://localhost:[port]/api
    </details>
 
 <details>
@@ -857,21 +870,24 @@ MCPHub.nvim uses an Express server to manage MCP servers and handle client reque
 
    - Checks for mcp-hub command installation
    - Verifies version compatibility
-   - Starts mcp-hub with provided port and config file
-   - Creates Express server at localhost:[port]
+   - Checks if server is already running (multi-instance support)
+   - If not running, starts mcp-hub with config file watching enabled
+   - Creates Express server at `http://localhost:[config.port]` or at `config.server_url`
 
 2. After successful setup:
 
    - Calls on_ready callback with hub instance
-   - Hub instance provides REST API interface
-   - UI updates in real-time via `:MCPHub` command
+   - Hub instance provides REST API interface 
+   - Real-time UI updates via `:MCPHub` command
+   - Configuration changes auto-sync across instances
 
 3. Express Server Features:
 
+   - Real-time config file watching and syncing
    - Manages MCP server configurations
    - Handles tool execution requests
    - Provides resource access
-   - Multi-client support
+   - Multi-instance support with shared state
    - Automatic cleanup
 
 4. When Neovim instances close:
@@ -1001,6 +1017,7 @@ sequenceDiagram
 - [x] MCP Resources as variables in chat plugins
 - [x] MCP Prompts as slash commands in chat plugins
 - [ ] Support for #variables, /slash_commands in avante
+- [x] Enable LLM to start and stop MCP Servers dynamically
 - [x] Support SSE transport
 - [ ] Composio Integration
 - [ ] Better Docs and Wiki
@@ -1027,4 +1044,3 @@ For detailed documentation, visit our [Wiki](https://github.com/ravitemer/mcphub
 - [Example Implementations](https://github.com/ravitemer/mcphub.nvim/wiki/Example-Servers)
 - [API Reference](https://github.com/ravitemer/mcphub.nvim/wiki/API-Reference)
 - [Troubleshooting Guide](https://github.com/ravitemer/mcphub.nvim/wiki/Troubleshooting)
-

@@ -1,10 +1,48 @@
 local NuiLine = require("mcphub.utils.nuiline")
 local State = require("mcphub.state")
 local Text = require("mcphub.utils.text")
+local constants = require("mcphub.utils.constants")
 local native = require("mcphub.native")
 local utils = require("mcphub.utils")
 
 local M = {}
+
+function M.get_hub_info(state)
+    local icon = ({
+        [constants.HubState.STARTING] = "◉ ",
+        [constants.HubState.READY] = Text.icons.loaded .. " ",
+        [constants.HubState.RESTARTING] = "◉ ",
+        [constants.HubState.RESTARTED] = Text.icons.loaded .. " ",
+        [constants.HubState.STOPPING] = "◉ ",
+        [constants.HubState.STOPPED] = "○ ",
+        [constants.HubState.ERROR] = Text.icons.error .. " ",
+    })[state] or "⚠ "
+
+    local desc = ({
+        [constants.HubState.STARTING] = "Starting...",
+        [constants.HubState.READY] = "Connected",
+        [constants.HubState.RESTARTING] = "Restarting...",
+        [constants.HubState.RESTARTED] = "Restarted",
+        [constants.HubState.STOPPING] = "Stopping...",
+        [constants.HubState.STOPPED] = "Stopped",
+        [constants.HubState.ERROR] = "Error",
+    })[state] or "Unknown"
+
+    local hl = ({
+        [constants.HubState.STARTING] = Text.highlights.success,
+        [constants.HubState.READY] = Text.highlights.success,
+        [constants.HubState.RESTARTING] = Text.highlights.success,
+        [constants.HubState.RESTARTED] = Text.highlights.success,
+        [constants.HubState.STOPPING] = Text.highlights.warning,
+        [constants.HubState.STOPPED] = Text.highlights.warning,
+        [constants.HubState.ERROR] = Text.highlights.error,
+    })[state] or Text.highlights.error
+    return {
+        icon = icon,
+        desc = desc,
+        hl = hl,
+    }
+end
 
 --- Get server status information
 ---@param status string Server status
@@ -101,17 +139,8 @@ function M.render_cap_section(items, title, server_name, type, current_line)
         end
         table.insert(lines, Text.pad_line(line, nil, 6))
 
-        local hint
-        if type == "tool" then
-            hint = is_disabled and "Press 't' to enable tool" or "Press <CR> to use tool, 't' to disable"
-        elseif type == "resource" then
-            hint = is_disabled and "Press 't' to enable resource" or "Press <CR> to access resource, 't' to disable"
-        elseif type == "resourceTemplate" then
-            hint = is_disabled and "Press 't' to enable template" or "Press <CR> to access template, 't' to disable"
-        elseif type == "prompt" then
-            hint = is_disabled and "Press 't' to enable prompt" or "Press <CR> to use prompt, 't' to disable"
-        end
-
+        local hint = is_disabled and ("Press 't' to enable " .. type)
+            or string.format("Press 'l' to use %s, 't' to disable", type)
         table.insert(mappings, {
             line = current_line + #lines,
             type = type,
@@ -146,8 +175,7 @@ function M.render_server_capabilities(server, lines, current_line, config_source
     elseif server.status == "disconnected" then
         hint = "Press 't' to disable server"
     else
-        hint = view.expanded_server == server.name and "Press <CR> to collapse"
-            or "Press <CR> to expand, 't' to disable"
+        hint = view.expanded_server == server.name and "Press 'h' to collapse" or "Press 'l' to expand, 't' to disable"
     end
 
     view:track_line(current_line, "server", {
@@ -158,6 +186,12 @@ function M.render_server_capabilities(server, lines, current_line, config_source
 
     -- Show expanded server capabilities
     if server.status == "connected" and server.capabilities and view.expanded_server == server.name then
+        -- local desc = server.description or ""
+        -- if desc ~= "" then
+        --     table.insert(lines, Text.pad_line(NuiLine():append(tostring(desc), Text.highlights.muted), nil, 5))
+        --     current_line = current_line + 1
+        -- end
+
         local server_config = config_source[server.name] or {}
         if
             #server.capabilities.tools + #server.capabilities.resources + #server.capabilities.resourceTemplates
@@ -186,7 +220,7 @@ function M.render_server_capabilities(server, lines, current_line, config_source
             server_name = server.name,
             disabled = is_disabled,
             name = Text.icons.instructions .. " Custom Instructions",
-            hint = is_disabled and "Press 't' to enable instructions" or "Press <CR> to edit, 't' to disable",
+            hint = is_disabled and "Press 't' to enable instructions" or "Press 'l' to edit, 't' to disable",
         })
         table.insert(lines, Text.empty_line())
         current_line = current_line + 1
@@ -250,13 +284,20 @@ end
 ---@param server table Server data
 ---@return { line: NuiLine, mapping: table? }
 function M.render_server_line(server, active)
+    local is_native = native.is_native_server(server.name)
+    local server_config = (is_native and State.native_servers_config[server.name] or State.servers_config[server.name])
+        or {}
+    local is_enabled = server_config.disabled ~= true
+    if is_native and not is_enabled then
+        server.status = "disabled"
+    end
     local status = M.get_server_status_info(server.status, active)
     local line = NuiLine()
     local hl = server.status == "connected" and Text.highlights.success or status.hl
     line:append(status.icon, status.hl)
     line:append(server.displayName or server.name, hl)
     if server.transportType == "sse" then
-        line:append(" " .. (server.status == "connected" and Text.icons.antenna or Text.icons.antenna_off), hl)
+        line:append(" " .. (server.status == "connected" and Text.icons.sse or Text.icons.sse), hl)
     else
     end
 
@@ -268,9 +309,6 @@ function M.render_server_line(server, active)
         line:append(" - ", Text.highlights.muted):append(error_lines[1], Text.highlights.error)
     end
 
-    local is_native = native.is_native_server(server.name)
-    local server_config = (is_native and State.native_servers_config[server.name] or State.servers_config[server.name])
-        or {}
     -- Add capabilities counts inline for connected servers
     if server.status == "connected" and server.capabilities then
         if server_config.custom_instructions and server_config.custom_instructions.text ~= "" then

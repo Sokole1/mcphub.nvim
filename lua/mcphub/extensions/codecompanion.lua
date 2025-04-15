@@ -12,7 +12,7 @@ local function parse_params(action)
     local tool_name = action.tool_name
     local uri = action.uri
     local arguments = nil
-    local json_ok, decode_result = pcall(vim.fn.json_decode, action.arguments or "{}")
+    local json_ok, decode_result = pcall(vim.fn.json_decode, action.tool_input or "{}")
     local errors = {}
     if not server_name then
         table.insert(errors, "Server name is required")
@@ -120,7 +120,7 @@ local tool_schema = {
                     },
                     server_name = "<![CDATA[weather-server]]>",
                     tool_name = "<![CDATA[get_forecast]]>",
-                    arguments = '<![CDATA[{"city": "San Francisco", "days": 5}]]>',
+                    tool_input = '<![CDATA[{"city": "San Francisco", "days": 5}]]>',
                 },
             },
         },
@@ -141,8 +141,12 @@ local tool_schema = {
     },
 
     system_prompt = function(schema)
-        -- get the running hub instance
-        local hub = require("mcphub").get_hub_instance()
+        local prompts = require("mcphub").get_hub_instance():generate_prompts({
+            add_example = true,
+            use_mcp_tool_example = xml2lua.toXml({ tools = { schema[1] } }),
+            access_mcp_resource_example = xml2lua.toXml({ tools = { schema[2] } }),
+        })
+
         return string.format(
             [[### MCP Tool
 
@@ -188,7 +192,7 @@ The Model Context Protocol (MCP) enables communication with locally running MCP 
    - When using the <action type="use_mcp_tool"></action> action: The following are a MUST
      * The server_name child tag must be provided with a valid server name
      * The tool_name child tag must be provided with a valid tool name of the server_name
-     * The arguments child tag must be always be a JSON object with the required parameters from the tool_name's inputSchema
+     * The tool_input child tag must be always be a JSON object with the required parameters from the tool_name's inputSchema
        e.g: %s
    - When using the <action type="access_mcp_resource"></action> action: The following are a MUST
      * The server_name child tag must be provided with a valid server name
@@ -205,13 +209,9 @@ The Model Context Protocol (MCP) enables communication with locally running MCP 
 
 %s]],
             '<![CDATA[{"city": "San Francisco", "days": 5}]]>',
-            hub:get_use_mcp_tool_prompt(xml2lua.toXml({
-                tools = { schema[1] },
-            })), -- gets the prompt for the use_mcp_tool action
-            hub:get_access_mcp_resource_prompt(xml2lua.toXml({
-                tools = { schema[2] },
-            })), -- gets the prompt for the access_mcp_resource action
-            hub:get_active_servers_prompt(false) -- generates prompt from currently running mcp servers
+            prompts.use_mcp_tool,
+            prompts.access_mcp_resource,
+            prompts.active_servers
         )
     end,
     output = {
@@ -253,6 +253,17 @@ The Model Context Protocol (MCP) enables communication with locally running MCP 
             local result = output[1]
             local action_name = action._attr.type
 
+            local function replace_headers(text)
+                local lines = vim.split(text, "\n")
+                for i, line in ipairs(lines) do
+                    -- if line starts with #, ##, ###, #### etc replace them with >,>> ,>>> etc
+                    lines[i] = line:gsub("^(#+)", function(hash)
+                        local level = #hash
+                        return string.rep(">", level)
+                    end)
+                end
+                return table.concat(lines, "\n")
+            end
             -- Show text content if present
             if result.text and result.text ~= "" then
                 if State.config.extensions.codecompanion.show_result_in_chat == true then
@@ -262,7 +273,7 @@ The Model Context Protocol (MCP) enables communication with locally running MCP 
                             [[The `%s` call returned the following text: 
 %s]],
                             action_name,
-                            result.text
+                            replace_headers(result.text)
                         ),
                     })
                 else

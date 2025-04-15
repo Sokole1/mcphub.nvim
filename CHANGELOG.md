@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.8.0] - 2025-04-14
+
+### Added
+- Added `toggle_mcp_server` tool to mcphub native server
+  * Moved mcphub related resources from neovim server into mcphub server
+  * Added toggle_mcp_server tool that toggles a MCP server and returns the server schema when enabled
+  * We now do not need to pass the entire prompt of all servers upfront. As long as we have servers in our config LLM can see them. With disabled servers we send the server name and description if any so that LLM can dynamically start and stop servers
+  * Added description to MCP Servers (so that LLM has an overview of the server to pick which server to enable when we send disabled servers as well)
+    - Usual MCP Servers do not have any description
+    - Description will be attached to MCP Servers that are added from Marketplace
+    - You can also add description to native servers
+
+- Enhanced server prompts with disabled servers support
+  * Previously, disabled servers were hidden from system prompts
+  * Now includes both connected and disabled servers in system prompts with clear section separation
+
+### Changed
+- Improved CodeCompanion integration for better LLM interactions
+  * Enabled show_result_in_chat by default to provide better visibility of tool responses
+  * Whenever there are #Headers in the response when using mcp tools, we replace # with > because showing result in chat gives user more control and currently the # are not making it possible
+  * Pseudocode examples seems to produce better results even for xml based tools
+  * Renamed `arguments` parameter to `tool_input` in XML for clearer structure
+
+### Fixed
+- Fixed 'gd' preview rendering to properly highlight markdown syntax
+
+## [4.7.0] - 2025-04-13
+
+### Added
+- Complete multi-instance support
+  * Complete support for opening multiple neovim instance at a time
+  * MCP Hubs in all neovim instances are always in sync (toggling something or change changing config in one neovim will auto syncs other neovim instances)
+  * Changed lualine extension to adapt to these changes
+
+- Added file watching for servers.json
+  * Watches config file and updates necessary servers. No need to exit and enter neovim or press "R" to reload any servers after your servers.json file is changed.
+  * Config changes apply instantly without restart
+  * Changes sync across all running instances
+  * Smart reload that only updates affected servers
+
+- Added smart shutdown with delay
+  * Previoulsy when we exit neovim mcphub.nvim stops the server and when we enter neovim it starts the server.
+  * We can now set shutdown_delay (in millisecond) to let the server wait before shutdown. If we enter neovim again within this time it will cancel the timer.
+  * Defaults to 10 minutes. You can set this to as long as you want to make it run essentially as a systemd service
+
+- Improved UI navigation
+  * Added vim-style keys (hjkl) for movement
+
+### Changed
+- Updated MCP Hub to v3.0.0 for multi-instance support
+* Auto-resize windows on editor resize
+
+## [4.6.1] - 2025-04-10
+
+### Added 
+- In cases where mcp-hub server is hosted somewhere, you can set `config.server_url` e.g `http://mydomain.com:customport` or `https://url_without_need_for_port.com`
+- `server_url` defaults to `http://localhost:{config.port}`
+
 ## [4.6.0] - 2025-04-09
 
 ### Added

@@ -17,8 +17,9 @@ local M = {
     add_prompt = native.add_prompt,
 }
 
+local SHUTDOWN_DELAY = 10 * 60 * 1000 -- 10 minutes
 --- Setup MCPHub plugin with error handling and validation
---- @param opts? { port?: number, cmd?: string, native_servers? : table, cmdArgs?: table, config?: string, log?: table, on_ready?: fun(hub: MCPHub), on_error?: fun(err: string) }
+--- @param opts? { port?: number, server_url?: string, cmd?: string, native_servers? : table, cmdArgs?: table, config?: string, log?: table, on_ready?: fun(hub: MCPHub), on_error?: fun(err: string) }
 function M.setup(opts)
     -- Return if already setup or in progress
     if State.setup_state ~= "not_started" then
@@ -33,9 +34,12 @@ function M.setup(opts)
     -- Set default options
     local config = vim.tbl_deep_extend("force", {
         port = 37373, -- Default port for MCP Hub
+        server_url = nil, -- In cases where mcp-hub is hosted somewhere, set this to the server URL e.g `http://mydomain.com:customport` or `https://url_without_need_for_port.com`
         config = vim.fn.expand("~/.config/mcphub/servers.json"), -- Default config location
+        shutdown_delay = SHUTDOWN_DELAY, -- Delay before shutting down the mcp-hub
         native_servers = {},
         auto_approve = false,
+        auto_toggle_mcp_servers = true, -- Let LLMs start and stop MCP servers automatically
         use_bundled_binary = false, -- Whether to use bundled mcp-hub binary
         cmd = nil, -- will be set based on system if not provided
         cmdArgs = nil, -- will be set based on system if not provided
@@ -57,7 +61,7 @@ function M.setup(opts)
         },
         extensions = {
             codecompanion = {
-                show_result_in_chat = false,
+                show_result_in_chat = true,
                 make_slash_commands = true,
                 make_vars = true,
             },
@@ -217,7 +221,7 @@ function M._handle_version_check(j, code, config)
     ImageCache.setup()
 
     require("mcphub.extensions").setup("codecompanion", config.extensions.codecompanion)
-    --TODO: Add Support for Avante
+    require("mcphub.extensions").setup("avante", config.extensions.avante)
 
     -- Start hub
     hub:start({
@@ -250,67 +254,6 @@ end
 
 function M.get_state()
     return State
-end
-
--- Version check handler
-function M._handle_version_check(j, code, config)
-    if code ~= 0 then
-        local err = Error(
-            "SETUP",
-            Error.Types.SETUP.MISSING_DEPENDENCY,
-            "mcp-hub exited with non-zero code. Please verify your installation."
-        )
-        State:add_error(err)
-        State:update({
-            setup_state = "failed",
-        }, "setup")
-        config.on_error(tostring(err))
-        return
-    end
-
-    -- Validate version
-    local version_result = validation.validate_version(j:result()[1])
-    if not version_result.ok then
-        State:add_error(version_result.error)
-        State:update({
-            setup_state = "failed",
-        }, "setup")
-        config.on_error(tostring(version_result.error))
-        return
-    end
-
-    -- Create hub instance
-    local hub = MCPHub:new(config)
-    if not hub then
-        local err = Error("SETUP", Error.Types.SETUP.SERVER_START, "Failed to create MCPHub instance")
-        State:add_error(err)
-        State:update({
-            setup_state = "failed",
-        }, "setup")
-        config.on_error(tostring(err))
-        return
-    end
-
-    -- Store hub instance with direct assignment to preserve metatable
-    State.setup_state = "completed"
-    State.hub_instance = hub
-    State:notify_subscribers({
-        setup_state = true,
-        hub_instance = true,
-    }, "setup")
-
-    -- Initialize image cache
-    ImageCache.setup()
-
-    require("mcphub.extensions").setup("codecompanion", config.extensions.codecompanion)
-    --TODO: Add Support for Avante
-    require("mcphub.extensions").setup("avante", config.extensions.avante)
-
-    -- Start hub
-    hub:start({
-        on_ready = config.on_ready,
-        on_error = config.on_error,
-    })
 end
 
 return M
